@@ -14,7 +14,7 @@ For the purpose of passing the necessary credentials to this program, you can ei
 
 You need to have OpenVPN3 Linux installed on your system. Check the [official guide](https://community.openvpn.net/openvpn/wiki/OpenVPN3Linux) for details. This tool uses [oathtool](https://www.nongnu.org/oath-toolkit/) for TOTP generation. On debian, you can get that through the `oathtool` package. Python is needed to run the tool. I've tested it on Python 3.11. The requests Python package needs to be installed.
 
-If you are keeping your credentials in Bitwarden Password Manager, you would also need to have the (Bitwarden CLI)[https://bitwarden.com/help/cli/] [serving on localhost:8087](https://bitwarden.com/help/cli/#serve). This program will synchronize and unlock the vault and retrieve the needed information but will not lock the vault afterwards. The credentials are only retrieved once at the beginning and are not updated again.
+If you are keeping your credentials in Bitwarden Password Manager, you would also need to have the [Bitwarden CLI](https://bitwarden.com/help/cli/) [serving on localhost:8087](https://bitwarden.com/help/cli/#serve). This program will synchronize and unlock the vault and retrieve the needed information but will not lock the vault afterwards. The credentials are only retrieved once at the beginning and are not updated again.
 
 # What does a credentials file look like?
 
