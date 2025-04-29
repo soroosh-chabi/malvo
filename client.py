@@ -1,4 +1,5 @@
 import contextlib
+import getpass
 import logging
 import subprocess
 import sys
@@ -7,6 +8,7 @@ from dbus import SystemBus
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 import openvpn3
+import requests
 
 
 MINOR_MAP = {
@@ -70,14 +72,45 @@ def read_credentials():
     credentials = {}
     credentials_path = sys.argv[1]
     with open(credentials_path, encoding='utf8') as credentials_file:
-        while line := credentials_file.readline()[:-1]:
+        while line := credentials_file.readline():
+            if line[-1] == '\n':
+                line = line[:-1]
             key, value = line.split('=')
             credentials[key] = value
     return credentials
 
 
+BITWARDEN_BASE_URL = 'http://localhost:8087'
+
+
+def update_credentials_from_bitwarden(credentials):
+    if 'username-item' not in credentials and 'secret-item' not in credentials:
+        return
+    requests.post(f'{BITWARDEN_BASE_URL}/sync')
+    r = requests.get(f'{BITWARDEN_BASE_URL}/status')
+    r.raise_for_status()
+    if r.json()['data']['template']['status'] == 'locked':
+        password = getpass.getpass('Bitwarden master password: ')
+        requests.post(f'{BITWARDEN_BASE_URL}/unlock', json={'password': password}).raise_for_status()
+    if 'username-item' in credentials:
+        item = find_item(credentials['username-item'])
+        credentials['username'] = item['login']['username']
+        credentials['password'] = item['login']['password']
+    if 'secret-item' in credentials:
+        credentials['secret'] = find_item(credentials['secret-item'])['login']['totp']
+
+
+def find_item(item_name: str):
+    r = requests.get(f'{BITWARDEN_BASE_URL}/list/object/items', params={'search': item_name})
+    r.raise_for_status()
+    for item in r.json()['data']['data']:
+        if item['name'] == item_name:
+            return item
+
+
 credentials = read_credentials()
 logging.basicConfig(format=f'%(asctime)s:{credentials["config"]}:%(levelname)s:%(message)s', level=logging.INFO)
+update_credentials_from_bitwarden(credentials)
 DBusGMainLoop(set_as_default=True)
 bus = SystemBus()
 configuration_manager = openvpn3.ConfigurationManager(bus)
