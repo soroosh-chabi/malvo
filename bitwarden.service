@@ -1,0 +1,11 @@
+[Unit]
+Description=Bitwarden Password Manager API daemon
+
+[Service]
+ExecStart=/snap/bin/bw serve
+
+RestartSec=3
+Restart=always
+
+[Install]
+WantedBy=default.target
