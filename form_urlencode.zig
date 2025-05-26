@@ -3,24 +3,28 @@ const std = @import("std");
 test formUrlEncode {
     var encoded = std.ArrayList(u8).init(std.testing.allocator);
     defer encoded.deinit();
-    const params = [_]Pair{ .{ .key = "hello", .value = "world" }, .{ .key = "&hello", .value = "=world!/" } };
+    const params = [_]Tuple{ .{ .key = "hello", .value = "world" }, .{ .key = "&hello", .value = "=world!/" } };
     try formUrlEncode(&params, encoded.writer());
     try std.testing.expectEqualStrings("hello=world&%26hello=%3Dworld%21%2F", encoded.items);
 }
 
-const Pair = struct {
-    key: []const u8,
+pub const Tuple = struct {
+    name: []const u8,
     value: []const u8,
 };
 
-fn formUrlEncode(params: []const Pair, writer: anytype) @TypeOf(writer).Error!void {
-    for (params, 0..) |param, i| {
+/// This function encodes the given tuples, using the
+/// application/x-www-form-urlencoded serialization method as documented in
+/// <https://url.spec.whatwg.org/#urlencoded-serializing>.
+/// For writer you can pass in any `std.io.Writer`.
+pub fn formUrlEncode(tuples: []const Tuple, writer: anytype) @TypeOf(writer).Error!void {
+    for (tuples, 0..) |tuple, i| {
         if (i > 0) {
             try writer.writeByte('&');
         }
-        try percentEncodeStr(param.key, writer);
+        try percentEncodeStr(tuple.name, writer);
         try writer.writeByte('=');
-        try percentEncodeStr(param.value, writer);
+        try percentEncodeStr(tuple.value, writer);
     }
 }
 
