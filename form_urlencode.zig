@@ -3,7 +3,7 @@ const std = @import("std");
 test formUrlEncode {
     var encoded = std.ArrayList(u8).init(std.testing.allocator);
     defer encoded.deinit();
-    const params = [_]Tuple{ .{ .key = "hello", .value = "world" }, .{ .key = "&hello", .value = "=world!/" } };
+    const params = [_]Tuple{ .{ .name = "hello", .value = "world" }, .{ .name = "&hello", .value = "=world!/" } };
     try formUrlEncode(&params, encoded.writer());
     try std.testing.expectEqualStrings("hello=world&%26hello=%3Dworld%21%2F", encoded.items);
 }
@@ -16,19 +16,30 @@ pub const Tuple = struct {
 /// This function encodes the given tuples, using the
 /// application/x-www-form-urlencoded serialization method as documented in
 /// <https://url.spec.whatwg.org/#urlencoded-serializing>.
-/// For writer you can pass in any `std.io.Writer`.
+/// For `writer` you can pass in any `std.io.Writer`.
 pub fn formUrlEncode(tuples: []const Tuple, writer: anytype) @TypeOf(writer).Error!void {
     for (tuples, 0..) |tuple, i| {
         if (i > 0) {
             try writer.writeByte('&');
         }
-        try percentEncodeStr(tuple.name, writer);
+        try percentEncode(tuple.name, writer);
         try writer.writeByte('=');
-        try percentEncodeStr(tuple.value, writer);
+        try percentEncode(tuple.value, writer);
     }
 }
 
-fn percentEncodeStr(str: []const u8, writer: anytype) @TypeOf(writer).Error!void {
+test percentEncode {
+    var encoded = std.ArrayList(u8).init(std.testing.allocator);
+    defer encoded.deinit();
+    try percentEncode("=world!/", encoded.writer());
+    try std.testing.expectEqualStrings("%3Dworld%21%2F", encoded.items);
+}
+
+/// This function percent encodes a string similar to
+/// <https://url.spec.whatwg.org/#string-percent-encode-after-encoding>
+/// the encoding at the beginning, assuming the input is already UTF-8 encoded.
+/// For `writer` you can pass in any `std.io.Writer`
+pub fn percentEncode(str: []const u8, writer: anytype) @TypeOf(writer).Error!void {
     for (str) |c| {
         if (inPercentEncodeSet(c)) {
             try writer.print("%{X}", .{c});
