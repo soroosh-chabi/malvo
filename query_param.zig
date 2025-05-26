@@ -1,10 +1,29 @@
 const std = @import("std");
 
 test "Percent Encode Set" {
-    try percentEncodeStr("me!&/!()", std.io.getStdOut().writer().any());
+    var writer = std.io.getStdOut().writer();
+    const params = [_]Pair{ .{ .key = "hello", .value = "world" }, .{ .key = "&hello", .value = "=world!/" } };
+    try formUrlEncode(&params, writer);
+    try writer.writeByte('\n');
 }
 
-fn percentEncodeStr(str: []const u8, writer: std.io.AnyWriter) !void {
+const Pair = struct {
+    key: []const u8,
+    value: []const u8,
+};
+
+fn formUrlEncode(params: []const Pair, writer: anytype) @TypeOf(writer).Error!void {
+    for (params, 0..) |param, i| {
+        if (i > 0) {
+            try writer.writeByte('&');
+        }
+        try percentEncodeStr(param.key, writer);
+        try writer.writeByte('=');
+        try percentEncodeStr(param.value, writer);
+    }
+}
+
+fn percentEncodeStr(str: []const u8, writer: anytype) @TypeOf(writer).Error!void {
     for (str) |c| {
         if (inPercentEncodeSet(c)) {
             try writer.print("%{X}", .{c});
