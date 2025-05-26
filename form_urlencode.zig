@@ -22,36 +22,22 @@ pub fn formUrlEncode(tuples: []const Tuple, writer: anytype) @TypeOf(writer).Err
         if (i > 0) {
             try writer.writeByte('&');
         }
-        try percentEncode(tuple.name, writer);
+        try std.Uri.Component.percentEncode(writer, tuple.name, notInPercentEncodeSet);
         try writer.writeByte('=');
-        try percentEncode(tuple.value, writer);
+        try std.Uri.Component.percentEncode(writer, tuple.value, notInPercentEncodeSet);
     }
 }
 
-test percentEncode {
+test notInPercentEncodeSet {
     var encoded = std.ArrayList(u8).init(std.testing.allocator);
     defer encoded.deinit();
-    try percentEncode("=world!/", encoded.writer());
+    try std.Uri.Component.percentEncode(encoded.writer(), "=world!/", notInPercentEncodeSet);
     try std.testing.expectEqualStrings("%3Dworld%21%2F", encoded.items);
 }
 
-/// This function percent encodes a string similar to
-/// <https://url.spec.whatwg.org/#string-percent-encode-after-encoding>
-/// the encoding at the beginning, assuming the input is already UTF-8 encoded.
-/// For `writer` you can pass in any `std.io.Writer`
-pub fn percentEncode(str: []const u8, writer: anytype) @TypeOf(writer).Error!void {
-    for (str) |c| {
-        if (inPercentEncodeSet(c)) {
-            try writer.print("%{X}", .{c});
-        } else {
-            try writer.writeByte(c);
-        }
-    }
-}
-
-fn inPercentEncodeSet(c: u8) bool {
+pub fn notInPercentEncodeSet(c: u8) bool {
     return switch (c) {
-        0x00...0x29, 0x2B, 0x2C, 0x2F, 0x3A...0x40, 0x5B...0x5E, 0x60, 0x7B...0xFF => true,
-        else => false,
+        0x00...0x29, 0x2B, 0x2C, 0x2F, 0x3A...0x40, 0x5B...0x5E, 0x60, 0x7B...0xFF => false,
+        else => true,
     };
 }
