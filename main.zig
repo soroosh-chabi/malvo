@@ -1,4 +1,5 @@
 const std = @import("std");
+const urlencode = @import("form_urlencode.zig");
 
 pub fn main() !void {
     var dbg_alloc = std.heap.DebugAllocator(.{}).init;
@@ -14,9 +15,10 @@ pub fn main() !void {
         const read = try getPasswd(&passwd);
         try unlock(allocator, &client, passwd[0..read]);
     }
+    _ = try findItem(allocator, &client, "keyam");
 }
 
-pub fn getPasswd(buffer: []u8) !usize {
+fn getPasswd(buffer: []u8) !usize {
     const stdin = std.io.getStdIn();
     const stdout = std.io.getStdOut();
     if (!(stdin.isTty() and stdout.isTty())) {
@@ -77,4 +79,25 @@ fn unlock(allocator: std.mem.Allocator, client: *std.http.Client, passwd: []cons
     if ((try client.fetch(fetch_options)).status != .ok) {
         return error.UnlockFailed;
     }
+}
+
+fn findItem(allocator: std.mem.Allocator, client: *std.http.Client, item_name: []const u8) !?std.json.Value {
+    var url = std.ArrayList(u8).init(allocator);
+    defer url.deinit();
+    try url.appendSlice("http://localhost:8087/list/object/items?search=");
+    try std.Uri.Component.percentEncode(url.writer(), item_name, urlencode.notInPercentEncodeSet);
+    var response = std.ArrayList(u8).init(allocator);
+    defer response.deinit();
+    const fetch_options: std.http.Client.FetchOptions = .{ .method = .GET, .location = .{ .url = url.items }, .response_storage = .{ .dynamic = &response } };
+    if ((try client.fetch(fetch_options)).status != .ok) {
+        return error.StatusFailed;
+    }
+    var parsed_response = try std.json.parseFromSlice(std.json.Value, allocator, response.items, .{});
+    defer parsed_response.deinit();
+    for (parsed_response.value.object.get("data").?.object.get("data").?.array.items) |item| {
+        if (std.mem.eql(u8, item.object.get("name").?.string, item_name)) {
+            return item;
+        }
+    }
+    return null;
 }
