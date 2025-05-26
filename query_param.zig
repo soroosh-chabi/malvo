@@ -1,10 +1,11 @@
 const std = @import("std");
 
-test "Percent Encode Set" {
-    var writer = std.io.getStdOut().writer();
+test formUrlEncode {
+    var encoded = std.ArrayList(u8).init(std.testing.allocator);
+    defer encoded.deinit();
     const params = [_]Pair{ .{ .key = "hello", .value = "world" }, .{ .key = "&hello", .value = "=world!/" } };
-    try formUrlEncode(&params, writer);
-    try writer.writeByte('\n');
+    try formUrlEncode(&params, encoded.writer());
+    try std.testing.expectEqualStrings("hello=world&%26hello=%3Dworld%21%2F", encoded.items);
 }
 
 const Pair = struct {
