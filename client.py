@@ -3,13 +3,19 @@ import getpass
 import logging
 import subprocess
 import sys
+import os
+import base64
 
 from dbus import SystemBus
 from dbus.mainloop.glib import DBusGMainLoop
 from gi.repository import GLib
 import openvpn3
-import requests
+from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
+
+SALT_LENGTH = 16  # Length of the salt in bytes
 
 MINOR_MAP = {
     2: 'Config parsed',
@@ -68,49 +74,64 @@ def disconnect_session():
         logging.info(f'{MINOR_MAP[9]}.')
 
 
+def get_encryption_key(salt):
+    # Get a PIN from the user for encryption
+    while True:
+        pin = getpass.getpass('Enter 4-digit PIN: ')
+        if not pin.isdigit() or len(pin) != 4:
+            print('PIN must be exactly 4 digits')
+            continue
+        break
+    # Convert PIN to bytes and use it as the password
+    password = pin.encode()
+    # Derive a key using PBKDF2
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=1_200_000,
+    )
+    key = base64.urlsafe_b64encode(kdf.derive(password))
+    return Fernet(key)
+
+
 def read_credentials():
     credentials = {}
     credentials_path = sys.argv[1]
-    with open(credentials_path, encoding='utf8') as credentials_file:
-        while line := credentials_file.readline():
-            if line[-1] == '\n':
-                line = line[:-1]
-            key, value = line.split('=')
-            credentials[key] = value
+    try:
+        with open(credentials_path, 'rb') as credentials_file:
+            # First SALT_LENGTH bytes are the salt
+            salt = credentials_file.read(SALT_LENGTH)
+            encrypted_data = credentials_file.read()
+            fernet = get_encryption_key(salt)
+            decrypted_data = fernet.decrypt(encrypted_data).decode('utf-8')
+            for line in decrypted_data.splitlines():
+                if line:
+                    key, value = line.split('=')
+                    credentials[key] = value
+    except FileNotFoundError:
+        # Create new credentials file with encrypted data
+        credentials = {
+            'username': input('Enter username: '),
+            'password': getpass.getpass('Enter password: '),
+            'secret': getpass.getpass('Enter TOTP secret: '),
+            'config': input('Enter config name: ')
+        }
+        # Generate a random salt
+        salt = os.urandom(SALT_LENGTH)
+        # Convert credentials to string and encrypt
+        credentials_str = '\n'.join(f'{k}={v}' for k, v in credentials.items())
+        fernet = get_encryption_key(salt)
+        encrypted_data = fernet.encrypt(credentials_str.encode('utf-8'))
+        # Write salt and encrypted data to file
+        with open(credentials_path, 'wb') as credentials_file:
+            credentials_file.write(salt)
+            credentials_file.write(encrypted_data)
     return credentials
-
-
-BITWARDEN_BASE_URL = 'http://localhost:8087'
-
-
-def update_credentials_from_bitwarden(credentials):
-    if 'username-item' not in credentials and 'secret-item' not in credentials:
-        return
-    requests.post(f'{BITWARDEN_BASE_URL}/sync')
-    r = requests.get(f'{BITWARDEN_BASE_URL}/status')
-    r.raise_for_status()
-    if r.json()['data']['template']['status'] == 'locked':
-        password = getpass.getpass('Bitwarden master password: ')
-        requests.post(f'{BITWARDEN_BASE_URL}/unlock', json={'password': password}).raise_for_status()
-    if 'username-item' in credentials:
-        item = find_item(credentials['username-item'])
-        credentials['username'] = item['login']['username']
-        credentials['password'] = item['login']['password']
-    if 'secret-item' in credentials:
-        credentials['secret'] = find_item(credentials['secret-item'])['login']['totp']
-
-
-def find_item(item_name: str):
-    r = requests.get(f'{BITWARDEN_BASE_URL}/list/object/items', params={'search': item_name})
-    r.raise_for_status()
-    for item in r.json()['data']['data']:
-        if item['name'] == item_name:
-            return item
 
 
 credentials = read_credentials()
 logging.basicConfig(format=f'%(asctime)s:{credentials["config"]}:%(levelname)s:%(message)s', level=logging.INFO)
-update_credentials_from_bitwarden(credentials)
 DBusGMainLoop(set_as_default=True)
 bus = SystemBus()
 configuration_manager = openvpn3.ConfigurationManager(bus)
