@@ -75,15 +75,15 @@ def disconnect_session():
 
 
 def get_encryption_key(salt):
-    # Get a PIN from the user for encryption
+    # Get a password from the user for encryption
     while True:
-        pin = getpass.getpass('Enter 4-digit PIN: ')
-        if not pin.isdigit() or len(pin) != 4:
-            print('PIN must be exactly 4 digits')
+        password = getpass.getpass('Enter password: ')
+        if not password:
+            print('Password cannot be empty')
             continue
         break
-    # Convert PIN to bytes and use it as the password
-    password = pin.encode()
+    # Convert password to bytes
+    password = password.encode()
     # Derive a key using PBKDF2
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
