@@ -10,7 +10,7 @@ This front-end supports OpenVPN configurations where authentication happens usin
 
 # What are the dependencies?
 
-You need to have OpenVPN3 Linux installed on your system. Check the [official guide](https://community.openvpn.net/openvpn/wiki/OpenVPN3Linux) for details. This tool uses [oathtool](https://www.nongnu.org/oath-toolkit/) for TOTP generation. On debian, you can get that through the `oathtool` package. Python is needed to run the tool. I've tested it on Python 3.11. The requests Python package needs to be installed.
+You need to have OpenVPN3 Linux installed on your system. Check the [official guide](https://community.openvpn.net/openvpn/wiki/OpenVPN3Linux) for details. This tool uses [oathtool](https://www.nongnu.org/oath-toolkit/) for TOTP generation. On debian, you can get that through the `oathtool` package. Python is needed to run the tool. You also need the `python3-cryptography` Debian package or the equivalent PyPI package. I've tested it on Python 3.13.
 
 # How is it run?
 
