@@ -44,15 +44,9 @@ def status_change_handler(status_major: int, status_minor: int, message: str):
             disconnect_session()
             start_new_session()
         elif status_minor == 11:
-            change_prefix = 'Authentication failed'
-            try:
-                session.Ready()
-            except Exception as e:
-                logging.error(f'{log_prefix}{change_prefix} because session is not ready: {e}')
-            else:
-                logging.info(f'{log_prefix}{change_prefix}.')
+            logging.info(f'{log_prefix}Authentication failed. Will wait awhile before retrying.')
             disconnect_session()
-            time.sleep(random.uniform(20, 45))
+            time.sleep(random.uniform(20, 40))
             start_new_session()
         elif minor_message := MINOR_MAP[status_minor]:
             logging.info(f'{log_prefix}{minor_message}.')
