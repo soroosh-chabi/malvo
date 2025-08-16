@@ -78,9 +78,10 @@ def start_new_session():
 
 def disconnect_session():
     global session
-    session.Disconnect()
-    session = None
-    logging.info(f'{MINOR_MAP[9]}.')
+    if session:
+        session.Disconnect()
+        session = None
+        logging.info(f'{MINOR_MAP[9]}.')
 
 
 def get_encryption_key(salt):
