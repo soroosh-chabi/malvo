@@ -6,6 +6,7 @@ import sys
 import os
 import base64
 import json
+import threading
 
 from dbus import SystemBus
 from dbus.mainloop.glib import DBusGMainLoop
@@ -37,7 +38,11 @@ def status_change_handler(status_major: int, status_minor: int, message: str):
         # For status_minor values consult https://codeberg.org/OpenVPN/openvpn3-linux/src/commit/fe2645567c9875509d8c3c3d88b22c4939779f8c/src/dbus/constants.hpp#L90
         logging.warning(f'{log_prefix}{status_major}, {status_minor}, {message}.')
     else:
-        if status_minor == 11:
+        if status_minor == 9:
+            session = None
+            disconnect_session()
+            start_new_session()
+        elif status_minor == 11:
             change_prefix = 'Authentication failed'
             try:
                 session.Ready()
@@ -46,10 +51,9 @@ def status_change_handler(status_major: int, status_minor: int, message: str):
             else:
                 logging.info(f'{log_prefix}{change_prefix}.')
             disconnect_session()
+            start_new_session()
         elif minor_message := MINOR_MAP[status_minor]:
             logging.info(f'{log_prefix}{minor_message}.')
-        if status_minor in [9, 11]:
-            start_new_session()
 
 
 def attention_required_handler(attention_type: int, attention_group: int, message: str):
@@ -57,6 +61,7 @@ def attention_required_handler(attention_type: int, attention_group: int, messag
 
 
 session: openvpn3.Session = None
+connect_thread: threading.Thread = None
 
 
 def start_new_session():
@@ -64,6 +69,11 @@ def start_new_session():
     session = session_manager.NewTunnel(configuration)
     session.StatusChangeCallback(status_change_handler)
     session.AttentionRequiredCallback(attention_required_handler)
+    connect_thread = threading.Thread(target=connect)
+    connect_thread.start()
+
+
+def connect():
     user_input_slots = session.FetchUserInputSlots()
     for user_input_slot in user_input_slots:
         if user_input_slot.GetVariableName() == 'username':
@@ -77,7 +87,10 @@ def start_new_session():
 
 
 def disconnect_session():
-    global session
+    global connect_thread, session
+    if connect_thread:
+        connect_thread.join()
+        connect_thread = None
     if session:
         session.Disconnect()
         session = None
