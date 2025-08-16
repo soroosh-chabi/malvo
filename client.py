@@ -76,15 +76,16 @@ def start_new_session():
 def connect():
     user_input_slots = session.FetchUserInputSlots()
     for user_input_slot in user_input_slots:
-        if user_input_slot.GetVariableName() == 'username':
-            user_input_slot.ProvideInput(credentials['username'])
-        elif user_input_slot.GetVariableName() == 'password':
-            user_input_slot.ProvideInput(credentials['password'])
-        elif user_input_slot.GetVariableName() == 'static_challenge':
-            completed_process = subprocess.run(('oathtool', '--totp', '-d6', '-b', credentials['secret']), stdout=subprocess.PIPE)
-            user_input_slot.ProvideInput(completed_process.stdout)
-        else:
-            logging.warning(f'Unknown user input slot: {user_input_slot.GetVariableName()}')
+        match user_input_slot.GetVariableName():
+            case 'username':
+                user_input_slot.ProvideInput(credentials['username'])
+            case 'password':
+                user_input_slot.ProvideInput(credentials['password'])
+            case 'static_challenge':
+                completed_process = subprocess.run(('oathtool', '--totp', '-d6', '-b', credentials['secret']), stdout=subprocess.PIPE)
+                user_input_slot.ProvideInput(completed_process.stdout)
+            case _ as unknown_variable_name:
+                logging.warning(f'Unknown user input slot: {unknown_variable_name}')
     session.Connect()
 
 
