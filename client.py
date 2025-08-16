@@ -19,25 +19,34 @@ from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 SALT_LENGTH = 16  # Length of the salt in bytes
 
 MINOR_MAP = {
-    2: 'Config parsed',
+    2: None,
     6: 'Connecting',
     7: 'Connected',
     8: 'Disconnecting',
     9: 'Disconnected',
-    11: 'Authentication failed',
+    11: None,
     12: 'Reconnecting',
     16: 'Connecion done',
 }
 
 
 def status_change_handler(status_major: int, status_minor: int, message: str):
+    log_prefix = 'Status Change: '
     if status_major != 2 or status_minor not in MINOR_MAP:
         # For status_major values consult https://codeberg.org/OpenVPN/openvpn3-linux/src/commit/fe2645567c9875509d8c3c3d88b22c4939779f8c/src/dbus/constants.hpp#L45
         # For status_minor values consult https://codeberg.org/OpenVPN/openvpn3-linux/src/commit/fe2645567c9875509d8c3c3d88b22c4939779f8c/src/dbus/constants.hpp#L90
-        logging.warning(f'Status Change: {status_major}, {status_minor}, {message}.')
+        logging.warning(f'{log_prefix}{status_major}, {status_minor}, {message}.')
     else:
-        if minor_message := MINOR_MAP[status_minor]:
-           logging.info(f'Status Change: {minor_message}.')
+        if status_minor == 11:
+            change_prefix = 'Authentication failed'
+            try:
+                session.Ready()
+            except Exception as e:
+                logging.error(f'{log_prefix}{change_prefix} because session is not ready: {e}')
+            else:
+                logging.info(f'{log_prefix}{change_prefix}.')
+        elif minor_message := MINOR_MAP[status_minor]:
+            logging.info(f'{log_prefix}{minor_message}.')
         if status_minor in [9, 11]:
             start_new_session()
 
