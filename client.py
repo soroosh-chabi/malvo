@@ -32,6 +32,7 @@ MINOR_MAP = {
 
 
 def status_change_handler(status_major: int, status_minor: int, message: str):
+    global session
     log_prefix = 'Status Change: '
     if status_major != 2 or status_minor not in MINOR_MAP:
         # For status_major values consult https://codeberg.org/OpenVPN/openvpn3-linux/src/commit/fe2645567c9875509d8c3c3d88b22c4939779f8c/src/dbus/constants.hpp#L45
@@ -82,8 +83,8 @@ def connect():
             case 'password':
                 user_input_slot.ProvideInput(credentials['password'])
             case 'static_challenge':
-                completed_process = subprocess.run(('oathtool', '--totp', '-d6', '-b', credentials['secret']), stdout=subprocess.PIPE)
-                user_input_slot.ProvideInput(completed_process.stdout)
+                completed_process = subprocess.run(('oathtool', '--totp', '-d6', '-b', credentials['secret']), stdout=subprocess.PIPE, text=True)
+                user_input_slot.ProvideInput(completed_process.stdout.strip())
             case _ as unknown_variable_name:
                 logging.warning(f'Unknown user input slot: {unknown_variable_name}')
     session.Connect()
