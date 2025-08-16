@@ -7,6 +7,8 @@ import os
 import base64
 import json
 import threading
+import time
+import random
 
 from dbus import SystemBus
 from dbus.mainloop.glib import DBusGMainLoop
@@ -50,6 +52,7 @@ def status_change_handler(status_major: int, status_minor: int, message: str):
             else:
                 logging.info(f'{log_prefix}{change_prefix}.')
             disconnect_session()
+            time.sleep(random.uniform(20, 45))
             start_new_session()
         elif minor_message := MINOR_MAP[status_minor]:
             logging.info(f'{log_prefix}{minor_message}.')
