@@ -17,8 +17,6 @@ from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 
 
-SALT_LENGTH = 16  # Length of the salt in bytes
-
 MINOR_MAP = {
     2: None,
     6: 'Connecting',
@@ -119,8 +117,10 @@ def get_encryption_key(salt):
     return Fernet(key)
 
 
+SALT_LENGTH = 16
+
+
 def read_credentials():
-    credentials = {}
     credentials_path = sys.argv[1]
     try:
         with open(credentials_path, 'rb') as credentials_file:
