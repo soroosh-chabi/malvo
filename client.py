@@ -80,9 +80,11 @@ def connect():
             user_input_slot.ProvideInput(credentials['username'])
         elif user_input_slot.GetVariableName() == 'password':
             user_input_slot.ProvideInput(credentials['password'])
-        else:
+        elif user_input_slot.GetVariableName() == 'static_challenge':
             completed_process = subprocess.run(('oathtool', '--totp', '-d6', '-b', credentials['secret']), stdout=subprocess.PIPE)
             user_input_slot.ProvideInput(completed_process.stdout)
+        else:
+            logging.warning(f'Unknown user input slot: {user_input_slot.GetVariableName()}')
     session.Connect()
 
 
