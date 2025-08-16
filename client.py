@@ -66,7 +66,7 @@ connect_thread: threading.Thread = None
 
 
 def start_new_session():
-    global session
+    global connect_thread, session
     session = session_manager.NewTunnel(configuration)
     session.StatusChangeCallback(status_change_handler)
     session.AttentionRequiredCallback(attention_required_handler)
