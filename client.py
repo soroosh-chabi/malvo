@@ -45,6 +45,7 @@ def status_change_handler(status_major: int, status_minor: int, message: str):
                 logging.error(f'{log_prefix}{change_prefix} because session is not ready: {e}')
             else:
                 logging.info(f'{log_prefix}{change_prefix}.')
+            disconnect_session()
         elif minor_message := MINOR_MAP[status_minor]:
             logging.info(f'{log_prefix}{minor_message}.')
         if status_minor in [9, 11]:
@@ -60,7 +61,6 @@ session: openvpn3.Session = None
 
 def start_new_session():
     global session
-    disconnect_session()
     session = session_manager.NewTunnel(configuration)
     session.StatusChangeCallback(status_change_handler)
     session.AttentionRequiredCallback(attention_required_handler)
@@ -78,10 +78,9 @@ def start_new_session():
 
 def disconnect_session():
     global session
-    if session:
-        session.Disconnect()
-        session = None
-        logging.info(f'{MINOR_MAP[9]}.')
+    session.Disconnect()
+    session = None
+    logging.info(f'{MINOR_MAP[9]}.')
 
 
 def get_encryption_key(salt):
