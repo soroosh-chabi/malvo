@@ -5,6 +5,7 @@ import subprocess
 import sys
 import os
 import base64
+import json
 
 from dbus import SystemBus
 from dbus.mainloop.glib import DBusGMainLoop
@@ -75,16 +76,13 @@ def disconnect_session():
 
 
 def get_encryption_key(salt):
-    # Get a password from the user for encryption
     while True:
         password = getpass.getpass('Enter password: ')
         if not password:
             print('Password cannot be empty')
             continue
         break
-    # Convert password to bytes
     password = password.encode()
-    # Derive a key using PBKDF2
     kdf = PBKDF2HMAC(
         algorithm=hashes.SHA256(),
         length=32,
@@ -100,30 +98,21 @@ def read_credentials():
     credentials_path = sys.argv[1]
     try:
         with open(credentials_path, 'rb') as credentials_file:
-            # First SALT_LENGTH bytes are the salt
             salt = credentials_file.read(SALT_LENGTH)
             encrypted_data = credentials_file.read()
             fernet = get_encryption_key(salt)
             decrypted_data = fernet.decrypt(encrypted_data).decode('utf-8')
-            for line in decrypted_data.splitlines():
-                if line:
-                    key, value = line.split('=')
-                    credentials[key] = value
+            credentials = json.loads(decrypted_data)
     except FileNotFoundError:
-        # Create new credentials file with encrypted data
         credentials = {
             'username': input('Enter username: '),
             'password': getpass.getpass('Enter password: '),
             'secret': getpass.getpass('Enter TOTP secret: '),
             'config': input('Enter config name: ')
         }
-        # Generate a random salt
         salt = os.urandom(SALT_LENGTH)
-        # Convert credentials to string and encrypt
-        credentials_str = '\n'.join(f'{k}={v}' for k, v in credentials.items())
         fernet = get_encryption_key(salt)
-        encrypted_data = fernet.encrypt(credentials_str.encode('utf-8'))
-        # Write salt and encrypted data to file
+        encrypted_data = fernet.encrypt(json.dumps(credentials).encode('utf-8'))
         with open(credentials_path, 'wb') as credentials_file:
             credentials_file.write(salt)
             credentials_file.write(encrypted_data)
