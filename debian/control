@@ -14,9 +14,10 @@ Depends: openvpn3-client,
          python3-cryptography,
          python3-dbus,
          python3-gi,
+         python3-xdg,
          ${misc:Depends}
-Description: OpenVPN3 Linux CLI front-end with auto-reconnect
+Description: OpenVPN3 Linux CLI front-end with credentials storage
  Malvo is a command-line front-end for OpenVPN3 Linux. It starts VPN
  sessions and reconnects on disconnection without user intervention,
- and logs session status to the terminal. It uses an encrypted
- credentials file (path given as the only argument).
+ and logs session status to the terminal. It uses password-protected
+ files for storing credentials.

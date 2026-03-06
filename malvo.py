@@ -18,6 +18,7 @@ import openvpn3
 from cryptography.fernet import Fernet
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+from xdg.BaseDirectory import save_data_path
 
 
 MINOR_MAP = {
@@ -119,7 +120,10 @@ SALT_LENGTH = 16
 
 
 def read_credentials():
-    credentials_path = sys.argv[1]
+    credentials_filename = sys.argv[1]
+    if credentials_filename != os.path.basename(credentials_filename):
+        sys.exit('Credentials file name must not contain path components.')
+    credentials_path = os.path.join(save_data_path('malvo'), credentials_filename)
     try:
         with open(credentials_path, 'rb') as credentials_file:
             salt = credentials_file.read(SALT_LENGTH)
