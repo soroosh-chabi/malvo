@@ -8,14 +8,32 @@ This front-end supports OpenVPN configurations where authentication happens usin
 - 6 digits
 - start time of UNIX epoch (1970-01-01 00:00:00 UTC)
 
-# What are the dependencies?
+# Building the package
 
-You need to have OpenVPN3 Linux installed on your system. Check the [official guide](https://community.openvpn.net/openvpn/wiki/OpenVPN3Linux) for details. This tool uses [oathtool](https://www.nongnu.org/oath-toolkit/) for TOTP generation. On debian, you can get that through the `oathtool` package. Python is needed to run the tool. You also need the `python3-cryptography` Debian package or the equivalent PyPI package. I've tested it on Python 3.13.
+Install the build dependencies (on Debian or Ubuntu):
+
+```
+sudo apt install dpkg-dev debhelper dh-exec
+```
+
+From the source tree, build the binary package with:
+
+```
+dpkg-buildpackage -T binary
+```
+
+The resulting `.deb` will be created in the parent directory.
+
+# Runtime dependencies
+
+The package depends on OpenVPN3 Linux ([official guide](https://community.openvpn.net/openvpn/wiki/OpenVPN3Linux)). You can install the latest version from OpenVPN's APT repositories; otherwise the one from Debian's archive will be used.
 
 # How is it run?
 
-Simply run
+Run
+
 ```
-python client.py <path_to_credentials>
+malvo <path_to_credentials>
 ```
+
 substituting the path to your credentials file. To stop the connection, use Ctrl+C (interrupt).

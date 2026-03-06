@@ -1,0 +1,6 @@
+/.debhelper/
+/malvo/
+/debhelper-build-stamp
+/files
+/malvo.substvars
+/tmp/

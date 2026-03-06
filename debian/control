@@ -1,0 +1,22 @@
+Source: malvo
+Section: net
+Priority: optional
+Maintainer: Soroosh Chabi <soroosh.chabi@gmail.com>
+Build-Depends: debhelper-compat (= 13), dh-exec
+Standards-Version: 4.7.2
+Rules-Requires-Root: no
+Homepage: https://github.com/soroosh-chabi/malvo
+
+Package: malvo
+Architecture: all
+Depends: openvpn3-client,
+         oathtool,
+         python3-cryptography,
+         python3-dbus,
+         python3-gi,
+         ${misc:Depends}
+Description: OpenVPN3 Linux CLI front-end with auto-reconnect
+ Malvo is a command-line front-end for OpenVPN3 Linux. It starts VPN
+ sessions and reconnects on disconnection without user intervention,
+ and logs session status to the terminal. It uses an encrypted
+ credentials file (path given as the only argument).
