@@ -10,7 +10,6 @@ Homepage: https://github.com/soroosh-chabi/malvo
 Package: malvo
 Architecture: all
 Depends: openvpn3-client,
-         oathtool,
          python3-cryptography,
          python3-gi,
          python3-xdg,

@@ -1,3 +1,8 @@
+malvo (0.3) UNRELEASED; urgency=medium
+
+  * Handle credentials required by the OpenVPN session generically but store username and password in the credentials file.
+
+ -- Soroosh Chabi <soroosh.chabi@gmail.com>  Thu, 12 Mar 2026 12:39:00 +0000
 malvo (0.2) UNRELEASED; urgency=medium
 
   * Async PyGOjbect rewrite.

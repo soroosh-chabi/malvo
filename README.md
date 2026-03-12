@@ -1,12 +1,6 @@
 # What is this?
 
-This is a command line OpenVPN3 Linux front-end for starting VPN sessions and reconnecting in case of disconnections without any user intervention. It directly logs the changes to session's status to the terminal. It also stores the credentials used with the OpenVPN3 config in a password protected file for easier access in later sessions. In order to do this, it needs to be given the *name* of the config as its only argument. The credentials file is stored in your XDG data directory (e.g. `~/.local/share/malvo/`) with the same name as the config.
-
-This front-end supports OpenVPN configurations where authentication happens using username and password and a TOTP used as a static challenge. For TOTP generation, the following paramters are assumed:
-- time-step duration of 30 seconds
-- SHA1 hash function
-- 6 digits
-- start time of UNIX epoch (1970-01-01 00:00:00 UTC)
+This is a command line OpenVPN3 Linux front-end for starting VPN sessions and reconnecting in case of disconnections without any user intervention. It directly logs the changes to session's status to the terminal. It also stores the username and password credentials used with the OpenVPN3 config in a password protected file for easier access in later sessions. In order to do this, it needs to be given the *name* of the config as its only argument. The credentials file is stored in your XDG data directory (e.g. `~/.local/share/malvo/`) with the same name as the config.
 
 # Building the package
 
