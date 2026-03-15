@@ -198,29 +198,27 @@ class StatusMinor(enum.IntEnum):
     CONN_DONE = 16
 
 
-def status_change_handler(failed: asyncio.Event):
-    async def callback(status_major: int, status_minor: int, message: str):
-        log_prefix = 'Status Change: '
-        if status_minor not in StatusMinor:
-            # For status_major values consult https://codeberg.org/OpenVPN/openvpn3-linux/src/commit/fe2645567c9875509d8c3c3d88b22c4939779f8c/src/dbus/constants.hpp#L45
-            # For status_minor values consult https://codeberg.org/OpenVPN/openvpn3-linux/src/commit/fe2645567c9875509d8c3c3d88b22c4939779f8c/src/dbus/constants.hpp#L90
-            logging.warning(f'{log_prefix}{status_major}, {status_minor}, {message}.')
-        else:
-            logging.info(f'{log_prefix}{StatusMinor(status_minor).name}{", " if message else ""}{message}.')
-        if status_minor in (StatusMinor.CONN_DISCONNECTING, StatusMinor.CONN_DISCONNECTED, StatusMinor.CONN_AUTH_FAILED, StatusMinor.CONN_DONE):
-            failed.set()
-    return callback
+def status_change_handler(status_major: int, status_minor: int, message: str, failed: asyncio.Event):
+    log_prefix = 'Status Change: '
+    if status_minor not in StatusMinor:
+        # For status_major values consult https://codeberg.org/OpenVPN/openvpn3-linux/src/commit/fe2645567c9875509d8c3c3d88b22c4939779f8c/src/dbus/constants.hpp#L45
+        # For status_minor values consult https://codeberg.org/OpenVPN/openvpn3-linux/src/commit/fe2645567c9875509d8c3c3d88b22c4939779f8c/src/dbus/constants.hpp#L90
+        logging.warning(f'{log_prefix}{status_major}, {status_minor}, {message}.')
+    else:
+        logging.info(f'{log_prefix}{StatusMinor(status_minor).name}{", " if message else ""}{message}.')
+    if status_minor in (StatusMinor.CONN_DISCONNECTING, StatusMinor.CONN_DISCONNECTED, StatusMinor.CONN_AUTH_FAILED, StatusMinor.CONN_DONE):
+        failed.set()
 
 
 @contextlib.asynccontextmanager
-async def status_change(connection: Gio.DBusConnection, session_path: str, callback: Callable[[int, int, str], Coroutine[None, None, None]]):
-    def pre_callback(_connection, _sender_name, _object_path, _interface_name, _signal_name, parameters: GLib.Variant):
+async def status_change(connection: Gio.DBusConnection, session_path: str, queue: asyncio.Queue):
+    def callback(_connection, _sender_name, _object_path, _interface_name, _signal_name, parameters: GLib.Variant):
         status_major = parameters.get_child_value(0).get_uint32()
         status_minor = parameters.get_child_value(1).get_uint32()
         message = parameters.get_child_value(2).get_string()
-        asyncio.create_task(callback(status_major, status_minor, message))
+        queue.put_nowait(('status_change', (status_major, status_minor, message)))
     await call_with_retry(connection, 'net.openvpn.v3.sessions', session_path, 'net.openvpn.v3.sessions', 'LogForward', GLib.Variant.new_tuple(GLib.Variant.new_boolean(True)))
-    subscription_id = connection.signal_subscribe('net.openvpn.v3.log', 'net.openvpn.v3.backends', 'StatusChange', session_path, None, Gio.DBusSignalFlags.NONE, pre_callback)
+    subscription_id = connection.signal_subscribe('net.openvpn.v3.log', 'net.openvpn.v3.backends', 'StatusChange', session_path, None, Gio.DBusSignalFlags.NONE, callback)
     try:
         yield
     finally:
@@ -228,57 +226,52 @@ async def status_change(connection: Gio.DBusConnection, session_path: str, callb
 
 
 @contextlib.contextmanager
-def prepare_for_sleep(connection: Gio.DBusConnection, callback: Callable[[bool], Coroutine[None, None, None]]):
-    def pre_callback(_connection, _sender_name, _object_path, _interface_name, _signal_name, parameters: GLib.Variant):
+def prepare_for_sleep(connection: Gio.DBusConnection, queue: asyncio.Queue):
+    def callback(_connection, _sender_name, _object_path, _interface_name, _signal_name, parameters: GLib.Variant):
         start = parameters.get_child_value(0).get_boolean()
-        asyncio.create_task(callback(start))
-    subscription_id = connection.signal_subscribe('org.freedesktop.login1', 'org.freedesktop.login1.Manager', 'PrepareForSleep', '/org/freedesktop/login1', None, Gio.DBusSignalFlags.NONE, pre_callback)
+        queue.put_nowait(('prepare_for_sleep', start))
+    subscription_id = connection.signal_subscribe('org.freedesktop.login1', 'org.freedesktop.login1.Manager', 'PrepareForSleep', '/org/freedesktop/login1', None, Gio.DBusSignalFlags.NONE, callback)
     try:
         yield
     finally:
         connection.signal_unsubscribe(subscription_id)
 
 
-def prepare_for_sleep_handler(connection: Gio.DBusConnection, session_path: str, failed: asyncio.Event):
-    async def callback(start: bool):
-        try:
-            if start:
-                await pause(connection, session_path, 'going to sleep')
-            else:
-                await resume(connection, session_path)
-        except Exception:
-            logging.exception('Exception in prepare for sleep handler.')
-            failed.set()
-    return callback
+async def prepare_for_sleep_handler(connection: Gio.DBusConnection, session_path: str, start: bool, failed: asyncio.Event):
+    try:
+        if start:
+            await pause(connection, session_path, 'going to sleep')
+        else:
+            await resume(connection, session_path)
+    except Exception:
+        logging.exception('Exception in prepare for sleep handler.')
+        failed.set()
 
 
 @contextlib.contextmanager
-def active_login_session(connection: Gio.DBusConnection, callback: Callable[[str, int], Coroutine[None, None, None]]):
-    def pre_callback(_connection, _sender_name, _object_path, _interface_name, _signal_name, parameters: GLib.Variant):
+def active_login_session(connection: Gio.DBusConnection, queue: asyncio.Queue):
+    def callback(_connection, _sender_name, _object_path, _interface_name, _signal_name, parameters: GLib.Variant):
         if active_session := parameters.get_child_value(1).lookup_value('ActiveSession'):
             active_session_path = active_session.get_child_value(1).get_string()
-            asyncio.create_task(callback(active_session_path, user_id))
-    subscription_id = connection.signal_subscribe('org.freedesktop.login1', 'org.freedesktop.DBus.Properties', 'PropertiesChanged', '/org/freedesktop/login1/seat/seat0', None, Gio.DBusSignalFlags.NONE, pre_callback)
-    user_id = os.getuid()
+            queue.put_nowait(('active_login_session', active_session_path))
+    subscription_id = connection.signal_subscribe('org.freedesktop.login1', 'org.freedesktop.DBus.Properties', 'PropertiesChanged', '/org/freedesktop/login1/seat/seat0', None, Gio.DBusSignalFlags.NONE, callback)
     try:
         yield
     finally:
         connection.signal_unsubscribe(subscription_id)
 
 
-def active_login_session_handler(connection: Gio.DBusConnection, session_path: str, failed: asyncio.Event):
-    async def callback(active_session: str, owner_user_id: int):
-        try:
-            response = await call_with_retry(connection, 'org.freedesktop.login1', active_session, 'org.freedesktop.DBus.Properties', 'Get', GLib.Variant.new_tuple(GLib.Variant.new_string('org.freedesktop.login1.Session'), GLib.Variant.new_string('User')))
-            session_user_id = response.get_child_value(0).get_variant().get_child_value(0).get_uint32()
-            if session_user_id == owner_user_id:
-                await resume(connection, session_path)
-            else:
-                await pause(connection, session_path, 'other user is active')
-        except Exception:
-            logging.exception('Exception in active session handler.')
-            failed.set()
-    return callback
+async def active_login_session_handler(connection: Gio.DBusConnection, session_path: str, owner_user_id: int, active_session_path: str, failed: asyncio.Event):
+    try:
+        response = await call_with_retry(connection, 'org.freedesktop.login1', active_session_path, 'org.freedesktop.DBus.Properties', 'Get', GLib.Variant.new_tuple(GLib.Variant.new_string('org.freedesktop.login1.Session'), GLib.Variant.new_string('User')))
+        session_user_id = response.get_child_value(0).get_variant().get_child_value(0).get_uint32()
+        if session_user_id == owner_user_id:
+            await resume(connection, session_path)
+        else:
+            await pause(connection, session_path, 'other user is active')
+    except Exception:
+        logging.exception('Exception in active session handler.')
+        failed.set()
 
 
 async def pause(connection: Gio.DBusConnection, session_path: str, reason: str):
@@ -292,11 +285,23 @@ async def resume(connection: Gio.DBusConnection, session_path: str):
 async def session(connection: Gio.DBusConnection, credential_manager: CredentialManager, config_path: str):
     async with tunnel(connection, config_path) as session_path:
         failed = asyncio.Event()
-        async with status_change(connection, session_path, status_change_handler(failed)):
+        queue = asyncio.Queue()
+        async with status_change(connection, session_path, queue):
             await set_inputs(connection, session_path, credential_manager)
             await connect(connection, session_path)
-            with active_login_session(connection, active_login_session_handler(connection, session_path, failed)), prepare_for_sleep(connection, prepare_for_sleep_handler(connection, session_path, failed)):
-                await failed.wait()
+            with active_login_session(connection, queue), prepare_for_sleep(connection, queue):
+                user_id = os.getuid()
+                while True:
+                    event = await queue.get()
+                    match event:
+                        case ('status_change', (status_major, status_minor, message)):
+                            status_change_handler(status_major, status_minor, message, failed)
+                        case ('prepare_for_sleep', start):
+                            await prepare_for_sleep_handler(connection, session_path, start, failed)
+                        case ('active_login_session', active_session_path):
+                            await active_login_session_handler(connection, session_path, user_id, active_session_path, failed)
+                    if failed.is_set():
+                        break
 
 
 async def get_config_path(connection: Gio.DBusConnection, config_name: str):
