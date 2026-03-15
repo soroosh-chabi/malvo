@@ -238,15 +238,20 @@ def prepare_for_sleep_handler(connection: Gio.DBusConnection, session_path: str,
         start = parameters.get_child_value(0).get_boolean()
         async def pause_resume():
             try:
-                if start:
-                    await call_with_retry(connection, 'net.openvpn.v3.sessions', session_path, 'net.openvpn.v3.sessions', 'Pause', GLib.Variant.new_tuple(GLib.Variant.new_string('going to sleep')))
-                else:
-                    await call_with_retry(connection, 'net.openvpn.v3.sessions', session_path, 'net.openvpn.v3.sessions', 'Resume', None)
+                await pause_resume(connection, session_path, start)
             except Exception:
                 logging.exception('Exception in pausing/resuming OpenVPN session.')
                 failed.set()
         asyncio.create_task(pause_resume())
     return callback
+
+
+async def pause_resume(connection: Gio.DBusConnection, session_path: str, start: bool):
+    if start:
+        await call_with_retry(connection, 'net.openvpn.v3.sessions', session_path, 'net.openvpn.v3.sessions', 'Pause', GLib.Variant.new_tuple(GLib.Variant.new_string('going to sleep')))
+    else:
+        await call_with_retry(connection, 'net.openvpn.v3.sessions', session_path, 'net.openvpn.v3.sessions', 'Resume', None)
+
 
 async def session(connection: Gio.DBusConnection, credential_manager: CredentialManager, config_path: str):
     async with tunnel(connection, config_path) as session_path:
