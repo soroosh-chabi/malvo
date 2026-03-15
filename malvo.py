@@ -250,12 +250,16 @@ async def prepare_for_sleep_handler(connection: Gio.DBusConnection, session_path
     return False
 
 
-@contextlib.contextmanager
-def active_login_session(connection: Gio.DBusConnection, queue: asyncio.Queue):
+@contextlib.asynccontextmanager
+async def active_login_session(connection: Gio.DBusConnection, queue: asyncio.Queue):
     def callback(_connection, _sender_name, _object_path, _interface_name, _signal_name, parameters: GLib.Variant):
         if active_session := parameters.get_child_value(1).lookup_value('ActiveSession'):
             active_session_path = active_session.get_child_value(1).get_string()
             queue.put_nowait(('active_login_session', active_session_path))
+    response = await call_with_retry(connection, 'org.freedesktop.login1', '/org/freedesktop/login1', 'org.freedesktop.login1.Manager', 'ListSeats', None)
+    if response.get_child_value(0).n_children() != 1:
+        logging.warning('Expected 1 seat, got %d.', response.get_child_value(0).n_children())
+        return
     subscription_id = connection.signal_subscribe('org.freedesktop.login1', 'org.freedesktop.DBus.Properties', 'PropertiesChanged', '/org/freedesktop/login1/seat/seat0', None, Gio.DBusSignalFlags.NONE, callback)
     try:
         yield
@@ -285,14 +289,12 @@ async def resume(connection: Gio.DBusConnection, session_path: str):
     await call_with_retry(connection, 'net.openvpn.v3.sessions', session_path, 'net.openvpn.v3.sessions', 'Resume', None)
 
 
-async def session(connection: Gio.DBusConnection, credential_manager: CredentialManager, config_path: str):
+async def session(connection: Gio.DBusConnection, credential_manager: CredentialManager, config_path: str, user_id: int, queue: asyncio.Queue):
     async with tunnel(connection, config_path) as session_path:
-        queue = asyncio.Queue()
         async with status_change(connection, session_path, queue):
             await set_inputs(connection, session_path, credential_manager)
             await connect(connection, session_path)
-            with active_login_session(connection, queue), prepare_for_sleep(connection, queue):
-                user_id = os.getuid()
+            with prepare_for_sleep(connection, queue):
                 failed = False
                 while not failed:
                     event = await queue.get()
@@ -312,12 +314,15 @@ async def get_config_path(connection: Gio.DBusConnection, config_name: str):
 
 async def session_manager(connection: Gio.DBusConnection, credential_manager: CredentialManager):
     config_path = await get_config_path(connection, credential_manager.config)
-    while True:
-        try:
-            await session(connection, credential_manager, config_path)
-        except Exception:
-            logging.exception('Exception in running Session.')
-            await asyncio.sleep(1)
+    queue = asyncio.Queue()
+    user_id = os.getuid()
+    async with active_login_session(connection, queue):
+        while True:
+            try:
+                await session(connection, credential_manager, config_path, user_id, queue)
+            except Exception:
+                logging.exception('Exception in running Session.')
+                await asyncio.sleep(1)
 
 
 async def run_interruptible(coro):
