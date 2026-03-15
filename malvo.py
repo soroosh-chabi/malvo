@@ -9,6 +9,7 @@ import os
 import signal
 import sys
 import termios
+from typing import Callable, Coroutine
 
 from gi.events import GLibEventLoopPolicy
 from gi.repository import GLib, Gio
@@ -225,8 +226,11 @@ async def status_change(connection: Gio.DBusConnection, session_path: str, faile
 
 
 @contextlib.contextmanager
-def prepare_for_sleep(connection: Gio.DBusConnection, session_path: str, failed: asyncio.Event):
-    subscription_id = connection.signal_subscribe('org.freedesktop.login1', 'org.freedesktop.login1.Manager', 'PrepareForSleep', '/org/freedesktop/login1', None, Gio.DBusSignalFlags.NONE, prepare_for_sleep_handler(connection, session_path, failed))
+def prepare_for_sleep(connection: Gio.DBusConnection, callback: Callable[[bool], Coroutine[None, None, None]]):
+    def pre_callback(_connection, _sender_name, _object_path, _interface_name, _signal_name, parameters: GLib.Variant):
+        start = parameters.get_child_value(0).get_boolean()
+        asyncio.create_task(callback(start))
+    subscription_id = connection.signal_subscribe('org.freedesktop.login1', 'org.freedesktop.login1.Manager', 'PrepareForSleep', '/org/freedesktop/login1', None, Gio.DBusSignalFlags.NONE, pre_callback)
     try:
         yield
     finally:
@@ -234,23 +238,53 @@ def prepare_for_sleep(connection: Gio.DBusConnection, session_path: str, failed:
 
 
 def prepare_for_sleep_handler(connection: Gio.DBusConnection, session_path: str, failed: asyncio.Event):
-    def callback(_connection, _sender_name, _object_path, _interface_name, _signal_name, parameters: GLib.Variant):
-        start = parameters.get_child_value(0).get_boolean()
-        async def pause_resume():
-            try:
-                await pause_resume(connection, session_path, start)
-            except Exception:
-                logging.exception('Exception in pausing/resuming OpenVPN session.')
-                failed.set()
-        asyncio.create_task(pause_resume())
+    async def callback(start: bool):
+        try:
+            if start:
+                await pause(connection, session_path, 'going to sleep')
+            else:
+                await resume(connection, session_path)
+        except Exception:
+            logging.exception('Exception in prepare for sleep handler.')
+            failed.set()
     return callback
 
 
-async def pause_resume(connection: Gio.DBusConnection, session_path: str, start: bool):
-    if start:
-        await call_with_retry(connection, 'net.openvpn.v3.sessions', session_path, 'net.openvpn.v3.sessions', 'Pause', GLib.Variant.new_tuple(GLib.Variant.new_string('going to sleep')))
-    else:
-        await call_with_retry(connection, 'net.openvpn.v3.sessions', session_path, 'net.openvpn.v3.sessions', 'Resume', None)
+@contextlib.contextmanager
+def active_session(connection: Gio.DBusConnection, callback: Callable[[str, int], Coroutine[None, None, None]]):
+    def pre_callback(_connection, _sender_name, _object_path, _interface_name, _signal_name, parameters: GLib.Variant):
+        if active_session := parameters.get_child_value(1).lookup_value('ActiveSession'):
+            active_session_path = active_session.get_child_value(1).get_string()
+            asyncio.create_task(callback(active_session_path, user_id))
+    subscription_id = connection.signal_subscribe('org.freedesktop.login1', 'org.freedesktop.DBus.Properties', 'PropertiesChanged', '/org/freedesktop/login1/seat/seat0', None, Gio.DBusSignalFlags.NONE, pre_callback)
+    user_id = os.getuid()
+    try:
+        yield
+    finally:
+        connection.signal_unsubscribe(subscription_id)
+
+
+def active_session_handler(connection: Gio.DBusConnection, session_path: str, failed: asyncio.Event):
+    async def callback(active_session: str, owner_user_id: int):
+        try:
+            response = await call_with_retry(connection, 'org.freedesktop.login1', active_session, 'org.freedesktop.DBus.Properties', 'Get', GLib.Variant.new_tuple(GLib.Variant.new_string('org.freedesktop.login1.Session'), GLib.Variant.new_string('User')))
+            session_user_id = response.get_child_value(0).get_variant().get_child_value(0).get_uint32()
+            if session_user_id == owner_user_id:
+                await resume(connection, session_path)
+            else:
+                await pause(connection, session_path, 'other user is active')
+        except Exception:
+            logging.exception('Exception in active session handler.')
+            failed.set()
+    return callback
+
+
+async def pause(connection: Gio.DBusConnection, session_path: str, reason: str):
+    await call_with_retry(connection, 'net.openvpn.v3.sessions', session_path, 'net.openvpn.v3.sessions', 'Pause', GLib.Variant.new_tuple(GLib.Variant.new_string(reason)))
+
+
+async def resume(connection: Gio.DBusConnection, session_path: str):
+    await call_with_retry(connection, 'net.openvpn.v3.sessions', session_path, 'net.openvpn.v3.sessions', 'Resume', None)
 
 
 async def session(connection: Gio.DBusConnection, credential_manager: CredentialManager, config_path: str):
@@ -259,7 +293,7 @@ async def session(connection: Gio.DBusConnection, credential_manager: Credential
         async with status_change(connection, session_path, failed):
             await set_inputs(connection, session_path, credential_manager)
             await connect(connection, session_path)
-            with prepare_for_sleep(connection, session_path, failed):
+            with active_session(connection, active_session_handler(connection, session_path, failed)), prepare_for_sleep(connection, prepare_for_sleep_handler(connection, session_path, failed)):
                 await failed.wait()
 
 
