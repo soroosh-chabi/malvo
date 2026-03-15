@@ -198,7 +198,7 @@ class StatusMinor(enum.IntEnum):
     CONN_DONE = 16
 
 
-def status_change_handler(status_major: int, status_minor: int, message: str, failed: asyncio.Event):
+def status_change_handler(status_major: int, status_minor: int, message: str) -> bool:
     log_prefix = 'Status Change: '
     if status_minor not in StatusMinor:
         # For status_major values consult https://codeberg.org/OpenVPN/openvpn3-linux/src/commit/fe2645567c9875509d8c3c3d88b22c4939779f8c/src/dbus/constants.hpp#L45
@@ -207,7 +207,8 @@ def status_change_handler(status_major: int, status_minor: int, message: str, fa
     else:
         logging.info(f'{log_prefix}{StatusMinor(status_minor).name}{", " if message else ""}{message}.')
     if status_minor in (StatusMinor.CONN_DISCONNECTING, StatusMinor.CONN_DISCONNECTED, StatusMinor.CONN_AUTH_FAILED, StatusMinor.CONN_DONE):
-        failed.set()
+        return True
+    return False
 
 
 @contextlib.asynccontextmanager
@@ -237,7 +238,7 @@ def prepare_for_sleep(connection: Gio.DBusConnection, queue: asyncio.Queue):
         connection.signal_unsubscribe(subscription_id)
 
 
-async def prepare_for_sleep_handler(connection: Gio.DBusConnection, session_path: str, start: bool, failed: asyncio.Event):
+async def prepare_for_sleep_handler(connection: Gio.DBusConnection, session_path: str, start: bool):
     try:
         if start:
             await pause(connection, session_path, 'going to sleep')
@@ -245,7 +246,8 @@ async def prepare_for_sleep_handler(connection: Gio.DBusConnection, session_path
             await resume(connection, session_path)
     except Exception:
         logging.exception('Exception in prepare for sleep handler.')
-        failed.set()
+        return True
+    return False
 
 
 @contextlib.contextmanager
@@ -261,7 +263,7 @@ def active_login_session(connection: Gio.DBusConnection, queue: asyncio.Queue):
         connection.signal_unsubscribe(subscription_id)
 
 
-async def active_login_session_handler(connection: Gio.DBusConnection, session_path: str, owner_user_id: int, active_session_path: str, failed: asyncio.Event):
+async def active_login_session_handler(connection: Gio.DBusConnection, session_path: str, owner_user_id: int, active_session_path: str):
     try:
         response = await call_with_retry(connection, 'org.freedesktop.login1', active_session_path, 'org.freedesktop.DBus.Properties', 'Get', GLib.Variant.new_tuple(GLib.Variant.new_string('org.freedesktop.login1.Session'), GLib.Variant.new_string('User')))
         session_user_id = response.get_child_value(0).get_variant().get_child_value(0).get_uint32()
@@ -271,7 +273,8 @@ async def active_login_session_handler(connection: Gio.DBusConnection, session_p
             await pause(connection, session_path, 'other user is active')
     except Exception:
         logging.exception('Exception in active session handler.')
-        failed.set()
+        return True
+    return False
 
 
 async def pause(connection: Gio.DBusConnection, session_path: str, reason: str):
@@ -284,24 +287,22 @@ async def resume(connection: Gio.DBusConnection, session_path: str):
 
 async def session(connection: Gio.DBusConnection, credential_manager: CredentialManager, config_path: str):
     async with tunnel(connection, config_path) as session_path:
-        failed = asyncio.Event()
         queue = asyncio.Queue()
         async with status_change(connection, session_path, queue):
             await set_inputs(connection, session_path, credential_manager)
             await connect(connection, session_path)
             with active_login_session(connection, queue), prepare_for_sleep(connection, queue):
                 user_id = os.getuid()
-                while True:
+                failed = False
+                while not failed:
                     event = await queue.get()
                     match event:
                         case ('status_change', (status_major, status_minor, message)):
-                            status_change_handler(status_major, status_minor, message, failed)
+                            failed = status_change_handler(status_major, status_minor, message)
                         case ('prepare_for_sleep', start):
-                            await prepare_for_sleep_handler(connection, session_path, start, failed)
+                            failed = await prepare_for_sleep_handler(connection, session_path, start)
                         case ('active_login_session', active_session_path):
-                            await active_login_session_handler(connection, session_path, user_id, active_session_path, failed)
-                    if failed.is_set():
-                        break
+                            failed = await active_login_session_handler(connection, session_path, user_id, active_session_path)
 
 
 async def get_config_path(connection: Gio.DBusConnection, config_name: str):
