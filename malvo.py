@@ -199,14 +199,11 @@ class StatusMinor(enum.IntEnum):
 
 
 def status_change_handler(failed: asyncio.Event):
-    def callback(_connection, _sender_name, _object_path, _interface_name, _signal_name, parameters: GLib.Variant):
-        status_minor = parameters.get_child_value(1).get_uint32()
-        message = parameters.get_child_value(2).get_string()
+    async def callback(status_major: int, status_minor: int, message: str):
         log_prefix = 'Status Change: '
         if status_minor not in StatusMinor:
             # For status_major values consult https://codeberg.org/OpenVPN/openvpn3-linux/src/commit/fe2645567c9875509d8c3c3d88b22c4939779f8c/src/dbus/constants.hpp#L45
             # For status_minor values consult https://codeberg.org/OpenVPN/openvpn3-linux/src/commit/fe2645567c9875509d8c3c3d88b22c4939779f8c/src/dbus/constants.hpp#L90
-            status_major = parameters.get_child_value(0).get_uint32()
             logging.warning(f'{log_prefix}{status_major}, {status_minor}, {message}.')
         else:
             logging.info(f'{log_prefix}{StatusMinor(status_minor).name}{", " if message else ""}{message}.')
@@ -216,9 +213,14 @@ def status_change_handler(failed: asyncio.Event):
 
 
 @contextlib.asynccontextmanager
-async def status_change(connection: Gio.DBusConnection, session_path: str, failed: asyncio.Event):
+async def status_change(connection: Gio.DBusConnection, session_path: str, callback: Callable[[int, int, str], Coroutine[None, None, None]]):
+    def pre_callback(_connection, _sender_name, _object_path, _interface_name, _signal_name, parameters: GLib.Variant):
+        status_major = parameters.get_child_value(0).get_uint32()
+        status_minor = parameters.get_child_value(1).get_uint32()
+        message = parameters.get_child_value(2).get_string()
+        asyncio.create_task(callback(status_major, status_minor, message))
     await call_with_retry(connection, 'net.openvpn.v3.sessions', session_path, 'net.openvpn.v3.sessions', 'LogForward', GLib.Variant.new_tuple(GLib.Variant.new_boolean(True)))
-    subscription_id = connection.signal_subscribe('net.openvpn.v3.log', 'net.openvpn.v3.backends', 'StatusChange', session_path, None, Gio.DBusSignalFlags.NONE, status_change_handler(failed))
+    subscription_id = connection.signal_subscribe('net.openvpn.v3.log', 'net.openvpn.v3.backends', 'StatusChange', session_path, None, Gio.DBusSignalFlags.NONE, pre_callback)
     try:
         yield
     finally:
@@ -251,7 +253,7 @@ def prepare_for_sleep_handler(connection: Gio.DBusConnection, session_path: str,
 
 
 @contextlib.contextmanager
-def active_session(connection: Gio.DBusConnection, callback: Callable[[str, int], Coroutine[None, None, None]]):
+def active_login_session(connection: Gio.DBusConnection, callback: Callable[[str, int], Coroutine[None, None, None]]):
     def pre_callback(_connection, _sender_name, _object_path, _interface_name, _signal_name, parameters: GLib.Variant):
         if active_session := parameters.get_child_value(1).lookup_value('ActiveSession'):
             active_session_path = active_session.get_child_value(1).get_string()
@@ -264,7 +266,7 @@ def active_session(connection: Gio.DBusConnection, callback: Callable[[str, int]
         connection.signal_unsubscribe(subscription_id)
 
 
-def active_session_handler(connection: Gio.DBusConnection, session_path: str, failed: asyncio.Event):
+def active_login_session_handler(connection: Gio.DBusConnection, session_path: str, failed: asyncio.Event):
     async def callback(active_session: str, owner_user_id: int):
         try:
             response = await call_with_retry(connection, 'org.freedesktop.login1', active_session, 'org.freedesktop.DBus.Properties', 'Get', GLib.Variant.new_tuple(GLib.Variant.new_string('org.freedesktop.login1.Session'), GLib.Variant.new_string('User')))
@@ -290,10 +292,10 @@ async def resume(connection: Gio.DBusConnection, session_path: str):
 async def session(connection: Gio.DBusConnection, credential_manager: CredentialManager, config_path: str):
     async with tunnel(connection, config_path) as session_path:
         failed = asyncio.Event()
-        async with status_change(connection, session_path, failed):
+        async with status_change(connection, session_path, status_change_handler(failed)):
             await set_inputs(connection, session_path, credential_manager)
             await connect(connection, session_path)
-            with active_session(connection, active_session_handler(connection, session_path, failed)), prepare_for_sleep(connection, prepare_for_sleep_handler(connection, session_path, failed)):
+            with active_login_session(connection, active_login_session_handler(connection, session_path, failed)), prepare_for_sleep(connection, prepare_for_sleep_handler(connection, session_path, failed)):
                 await failed.wait()
 
 
