@@ -147,8 +147,8 @@ async def call_with_retry(connection: Gio.DBusConnection, bus_name: str, object_
         except GLib.Error as excp:
             if "Object does not exist at path" not in str(excp):
                 raise
-            await asyncio.sleep(delay)
-            delay *= 1.33
+        await asyncio.sleep(delay)
+        delay *= 1.33
         attempts -= 1
     raise excp
 
@@ -198,10 +198,14 @@ class StatusChangeHandler:
     def __init__(self, connection: Gio.DBusConnection):
         self._connection = connection
         self.failed = asyncio.Event()
-        self.current_session = None
+        self._current_session = None
+
+    async def set_current_session(self, session_path: str):
+        self._current_session = session_path
+        await call_with_retry(self._connection, 'net.openvpn.v3.sessions', self._current_session, 'net.openvpn.v3.sessions', 'LogForward', GLib.Variant.new_tuple(GLib.Variant.new_boolean(True)))        
 
     def _callback(self, _connection, _sender_name, object_path: str, _interface_name, _signal_name, parameters: GLib.Variant):
-        if object_path != self.current_session:
+        if object_path != self._current_session:
             return
         status_minor = parameters.get_child_value(1).get_uint32()
         log_prefix = 'Status Change: '
@@ -227,8 +231,7 @@ class StatusChangeHandler:
 
 async def session(connection: Gio.DBusConnection, credential_manager: CredentialManager, config_path: str, status_change_handler: StatusChangeHandler):
     async with tunnel(connection, config_path) as session_path:
-        await call_with_retry(connection, 'net.openvpn.v3.sessions', session_path, 'net.openvpn.v3.sessions', 'LogForward', GLib.Variant.new_tuple(GLib.Variant.new_boolean(True)))
-        status_change_handler.current_session = session_path
+        await status_change_handler.set_current_session(session_path)
         await set_inputs(connection, session_path, credential_manager)
         await connect(connection, session_path)
         await status_change_handler.failed.wait()
