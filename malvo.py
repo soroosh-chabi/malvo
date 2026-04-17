@@ -208,7 +208,7 @@ class StatusChangeHandler:
         if object_path != self._current_session:
             return
         status_minor = parameters.get_child_value(1).get_uint32()
-        log_prefix = 'Status Change: '
+        log_prefix = 'Status Update: '
         if status_minor not in StatusMinor:
             # For status_major values consult https://codeberg.org/OpenVPN/openvpn3-linux/src/commit/fe2645567c9875509d8c3c3d88b22c4939779f8c/src/dbus/constants.hpp#L45
             # For status_minor values consult https://codeberg.org/OpenVPN/openvpn3-linux/src/commit/fe2645567c9875509d8c3c3d88b22c4939779f8c/src/dbus/constants.hpp#L90
