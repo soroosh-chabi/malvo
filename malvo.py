@@ -202,6 +202,7 @@ class StatusChangeHandler:
 
     async def set_current_session(self, session_path: str):
         self._current_session = session_path
+        self.failed.clear()
         await call_with_retry(self._connection, 'net.openvpn.v3.sessions', self._current_session, 'net.openvpn.v3.sessions', 'LogForward', GLib.Variant.new_tuple(GLib.Variant.new_boolean(True)))        
 
     def _callback(self, _connection, _sender_name, object_path: str, _interface_name, _signal_name, parameters: GLib.Variant):
