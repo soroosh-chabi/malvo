@@ -1,3 +1,8 @@
+malvo (0.4) UNRELEASED; urgency=medium
+
+  * Improve state update handling of the VPN connection.
+
+ -- Soroosh Chabi <soroosh.chabi@gmail.com>  Tue, 21 Apr 2026 14:04:00 +0000
 malvo (0.3) UNRELEASED; urgency=medium
 
   * Handle credentials required by the OpenVPN session generically but store username and password in the credentials file.

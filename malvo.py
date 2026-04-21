@@ -147,8 +147,8 @@ async def call_with_retry(connection: Gio.DBusConnection, bus_name: str, object_
         except GLib.Error as excp:
             if "Object does not exist at path" not in str(excp):
                 raise
-            await asyncio.sleep(delay)
-            delay *= 1.33
+        await asyncio.sleep(delay)
+        delay *= 1.33
         attempts -= 1
     raise excp
 
@@ -194,11 +194,22 @@ class StatusMinor(enum.IntEnum):
     CONN_DONE = 16
 
 
-def status_change_handler():
-    failed = asyncio.Event()
-    def callback(_connection, _sender_name, _object_path, _interface_name, _signal_name, parameters: GLib.Variant):
+class StatusChangeHandler:
+    def __init__(self, connection: Gio.DBusConnection):
+        self._connection = connection
+        self.failed = asyncio.Event()
+        self._current_session = None
+
+    async def set_current_session(self, session_path: str):
+        self._current_session = session_path
+        self.failed.clear()
+        await call_with_retry(self._connection, 'net.openvpn.v3.sessions', self._current_session, 'net.openvpn.v3.sessions', 'LogForward', GLib.Variant.new_tuple(GLib.Variant.new_boolean(True)))        
+
+    def _callback(self, _connection, _sender_name, object_path: str, _interface_name, _signal_name, parameters: GLib.Variant):
+        if object_path != self._current_session:
+            return
         status_minor = parameters.get_child_value(1).get_uint32()
-        log_prefix = 'Status Change: '
+        log_prefix = 'Status Update: '
         if status_minor not in StatusMinor:
             # For status_major values consult https://codeberg.org/OpenVPN/openvpn3-linux/src/commit/fe2645567c9875509d8c3c3d88b22c4939779f8c/src/dbus/constants.hpp#L45
             # For status_minor values consult https://codeberg.org/OpenVPN/openvpn3-linux/src/commit/fe2645567c9875509d8c3c3d88b22c4939779f8c/src/dbus/constants.hpp#L90
@@ -208,27 +219,23 @@ def status_change_handler():
         else:
             logging.info(f'{log_prefix}{StatusMinor(status_minor).name}.')
         if status_minor in (StatusMinor.CONN_DISCONNECTING, StatusMinor.CONN_DISCONNECTED, StatusMinor.CONN_AUTH_FAILED, StatusMinor.CONN_DONE):
-            failed.set()
-    return failed, callback
+            self.failed.set()
+
+    def __enter__(self):
+        self._subscription_id = self._connection.signal_subscribe('net.openvpn.v3.log', 'net.openvpn.v3.backends', 'StatusChange', None, None, Gio.DBusSignalFlags.NONE, self._callback)
+        return self
+
+    def __exit__(self, exc_type, exc_value, traceback):
+        self._connection.signal_unsubscribe(self._subscription_id)
+        return False
 
 
-@contextlib.asynccontextmanager
-async def status_change(connection: Gio.DBusConnection, session_path: str):
-    await call_with_retry(connection, 'net.openvpn.v3.sessions', session_path, 'net.openvpn.v3.sessions', 'LogForward', GLib.Variant.new_tuple(GLib.Variant.new_boolean(True)))
-    failed, callback = status_change_handler()
-    subscription_id = connection.signal_subscribe('net.openvpn.v3.log', 'net.openvpn.v3.backends', 'StatusChange', session_path, None, Gio.DBusSignalFlags.NONE, callback)
-    try:
-        yield failed
-    finally:
-        connection.signal_unsubscribe(subscription_id)
-
-
-async def session(connection: Gio.DBusConnection, credential_manager: CredentialManager, config_path: str):
+async def session(connection: Gio.DBusConnection, credential_manager: CredentialManager, config_path: str, status_change_handler: StatusChangeHandler):
     async with tunnel(connection, config_path) as session_path:
-        async with status_change(connection, session_path) as failed:
-            await set_inputs(connection, session_path, credential_manager)
-            await connect(connection, session_path)
-            await failed.wait()
+        await status_change_handler.set_current_session(session_path)
+        await set_inputs(connection, session_path, credential_manager)
+        await connect(connection, session_path)
+        await status_change_handler.failed.wait()
 
 
 async def get_config_path(connection: Gio.DBusConnection, config_name: str):
@@ -238,12 +245,13 @@ async def get_config_path(connection: Gio.DBusConnection, config_name: str):
 
 async def session_manager(connection: Gio.DBusConnection, credential_manager: CredentialManager):
     config_path = await get_config_path(connection, credential_manager.config)
-    while True:
-        try:
-            await session(connection, credential_manager, config_path)
-        except Exception:
-            logging.exception('Exception in running Session.')
-            await asyncio.sleep(1)
+    with StatusChangeHandler(connection) as status_change_handler:
+        while True:
+            try:
+                await session(connection, credential_manager, config_path, status_change_handler)
+            except Exception:
+                logging.exception('Exception in running Session.')
+                await asyncio.sleep(1)
 
 
 async def run_interruptible(coro):
